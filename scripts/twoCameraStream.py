@@ -199,17 +199,18 @@ def transform_points(T, pts_xyz):
 # <: Little-Endian
 # 8f: 8 float (4 byte ciascuno) (x1, y1, z1 per l'inizio, x2, y2, z2 per la fine, radius, conf)
 
-def cameraStreaming():
+def cameraStreaming(serial):
     align = rs.align(rs.stream.color) # Allinea depth a color
 
     # Inizializzazione pipeline RealSense
     pipe = rs.pipeline()
     cfg = rs.config()
+    cfg.enable_device(serial)
     cfg.enable_stream(rs.stream.depth, wCamera, hCamera, rs.format.z16, cameraRate)
     cfg.enable_stream(rs.stream.color, wCamera, hCamera, rs.format.bgr8, cameraRate)
     pipe.start(cfg)
 
-    return pipe, align
+    return pipe
 
 
 def main():    
@@ -225,13 +226,6 @@ def main():
     pub = ctx.socket(zmq.PUB) # socket di tipo Publisher (trasmette dati a chiunque sia connesso, se nessuno è connesso i dati vengono persi)
     pub.setsockopt(zmq.LINGER, 0) # Evita che ZMQ blocchi la chiusura se ci sono messaggi pendenti
     pub.bind(endpoint) # Associa il socket all'endpoint specificato (questo script python crea e possiede il socket, gli altri processi si connettono a questo endpoint, come il cpp del controllo ammettenza)
-
-    # Devices initialization: supporta più telecamere RealSense collegate, ognuna con la propria pipeline e allineamento
-    ctx = rs.context()
-    devices = ctx.devices
-    for i, device in enumerate(devices):
-        pipe, align = cameraStreaming(device.get_info(rs.camera_info.serial_number))
-        print(f"Device {i} initialized: {device.get_info(rs.camera_info.name)} (SN: {device.get_info(rs.camera_info.serial_number)})")
 
     # Inizializzazione VideoWriter
     video_writer = None
@@ -249,24 +243,29 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # Devices initialization: supporta più telecamere RealSense collegate, ognuna con la propria pipeline e allineamento
+    align = rs.align(rs.stream.color) # Allinea depth a color
 
-    while running:
-        # Acquisizione frame (fs)
-        fs = pipe1.wait_for_frames()
-        fs = align.process(fs) # Allineamento fondamentale per far corrispondere pixel RGB a Depth
-        color_img = fs.get_color_frame()
+    ctx = rs.context()
+    devices = ctx.devices
+    pipes = []
+    for i, device in enumerate(devices):
+        pipes.append(cameraStreaming(device.get_info(rs.camera_info.serial_number)))
+        print(f"Device {i} initialized: {device.get_info(rs.camera_info.name)} (SN: {device.get_info(rs.camera_info.serial_number)})")
 
-    """# Create threads
-    thread1 = threading.Thread(target=worker, args=("A", 2))
-    thread2 = threading.Thread(target=worker, args=("B", 3))
+    pipe = pipes[1] # Per ora usiamo solo la prima telecamera (se ce n'è più di una, si potrebbe estendere la logica per gestirle tutte)
 
-    # Start threads
-    thread1.start()
-    thread2.start()
-
-    # Wait for both to finish
-    thread1.join()
-    thread2.join()
+    # # Create threads
+    # thread1 = threading.Thread(target=worker, args=("A", 2))
+    # thread2 = threading.Thread(target=worker, args=("B", 3))
+# 
+    # # Start threads
+    # thread1.start()
+    # thread2.start()
+# 
+    # # Wait for both to finish
+    # thread1.join()
+    # thread2.join()
 
     while running:
         # Acquisizione frame (fs)
@@ -281,6 +280,7 @@ def main():
 
         # Conversione immagine per YOLO
         color_img = np.asanyarray(color.get_data()) # trasforma i dati grezzi della telecamera in un array NumPy
+        
         # Inferenza rete neurale
         t0 = time.time()
         results = model.predict(color_img, verbose=False)
@@ -369,16 +369,11 @@ def main():
         # Payload: Lista di capsule (*rec serve a spacchettare la tupla della capsula in singoli argomenti - grazie all'asterisco -)
         payload = b"".join(struct.pack(REC_FMT, *rec) for rec in caps)
         # Invio messaggio completo (header + payload) (singolo messaggio atomico)
-        pub.send(header + payload)"""
+        pub.send(header + payload)
 
         # Salvataggio video
         if save_video and video_writer is not None:
             video_writer.write(color_img)
-
-        # Mostra l'immagine a schermo (premere 'q' per uscire, anche se lo script bash lo chiuderà forzatamente)
-        cv2.imshow("YOLO Skeleton Realtime Camera 1", color_img)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
 
         # Mostra l'immagine a schermo (premere 'q' per uscire, anche se lo script bash lo chiuderà forzatamente)
         cv2.imshow("YOLO Skeleton Realtime Camera 2", color_img)
