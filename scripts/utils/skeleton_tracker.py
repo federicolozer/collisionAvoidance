@@ -17,6 +17,10 @@ import math
 import numpy as np
 import pyrealsense2 as rs
 import threading
+import logging
+
+logging.getLogger('ultralytics').setLevel(logging.ERROR)
+logging.getLogger('tensorrt').setLevel(logging.ERROR)
 
 TARGET_KEYPOINTS = list(range(13))  # 0..12 pelvis-up
 COCO_SKELETON = [
@@ -159,12 +163,12 @@ class SkeletonTracker:
                     if conf[k] >= conf_thr:
                         cv2.circle(color_img, (int(xy[k, 0]), int(xy[k, 1])), 4, (0, 0, 255), -1)
 
-            # Misura del tempo ciclo
-            tNow = time.time()
-            if n == 1:
-                print(f"\rTempo ciclo thread {n}: {tNow - t0:.3f} s", end="")
-            else:
-                print(f" - Tempo ciclo thread {n}: {tNow - t0:.3f} s", end="")
+            # # Misura del tempo ciclo
+            # tNow = time.time()
+            # if n == 1:
+            #     print(f"\rTempo ciclo thread {n}: {tNow - t0:.3f} s", end="")
+            # else:
+            #     print(f" - Tempo ciclo thread {n}: {tNow - t0:.3f} s", end="")
 
             #print( f"color_img: {color_img}")
             with self.mutex:

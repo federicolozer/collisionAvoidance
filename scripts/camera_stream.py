@@ -20,11 +20,8 @@ import zmq
 import pyrealsense2 as rs
 from ultralytics import YOLO
 from utils.skeleton_tracker import SkeletonTracker
-from utils.filters import Keypoints3DSmoother, Keypoints3DKalmanFilter
-import logging
-
-logging.getLogger('ultralytics').setLevel(logging.ERROR)
-logging.getLogger('tensorrt').setLevel(logging.ERROR)
+from utils.filters import Keypoints3DSmoother
+import time
 
 MAGIC = b"SKEL" 
 VERSION = 1
@@ -85,11 +82,7 @@ def main():
         video_writer = cv2.VideoWriter(video_filename, cv2.VideoWriter_fourcc(*'XVID'), 70, (w_camera, h_camera))
 
     # Inizializzazione filtri di smoothing
-    # Option 1: Use One Euro Filter (original)
-    # smoother = Keypoints3DSmoother(num_kpts=17, min_cutoff=0.1, beta=1.0)
-    
-    # Option 2: Use Kalman Filter (recommended for better tracking)
-    smoother = Keypoints3DKalmanFilter(num_kpts=17, process_variance=0.01, measurement_variance=0.1)
+    smoother = Keypoints3DSmoother(num_kpts=17, min_cutoff=0.1, beta=1.0)
 
     # Gestione segnali per chiusura pulita (es. CTRL+C o kill da script bash)
     def signal_handler(sig, frame):
@@ -108,8 +101,11 @@ def main():
         for i, device in enumerate(devices):
             trackers.append(SkeletonTracker(device.get_info(rs.camera_info.serial_number), align, model, smoother, i+1).start())
             print(f"Device {i} initialized: {device.get_info(rs.camera_info.name)} (SN: {device.get_info(rs.camera_info.serial_number)})")
-
+            
         while running:
+            t0 = time.time()
+            xyz_base_list = []
+            aaa = 0.1
             for n, tracker in enumerate(trackers):
                 frame = tracker.read_frame()
                 xyz, conf = tracker.read_coords()
@@ -119,38 +115,15 @@ def main():
                     # Usa xyz_cam_s direttamente (frame ottico nativo RealSense) invece di xyz_cam_mapped
                     xyz_base = transform_points(T_base_cam, xyz.astype(np.float64)).astype(np.float32)
                     conf = conf.astype(np.float32)
+                    xyz_base_list.append((xyz_base, conf))
+                    
+                    # df = px.data.iris()
+                    # fig = px.scatter_3d(df, x=xyz_base[:, 0], y=xyz_base[:, 1], z=xyz_base[:, 2], color='species')
+                    # fig = px.scatter_3d(df, x=1, y=1, z=1, color='species')
+                    # fig = px.scatter_3d(df, x=1, y=1, z=2, color='species')
+                    # fig.show()
 
-                    # --- MODIFICA: Capsule semplificate (Braccia + Busto/Testa unico) ---
-                    caps = []
-                    # Helper per validità
-                    def is_valid_kpt(k):
-                        return (conf[k] >= tracker.conf_thr) and np.all(np.isfinite(xyz_base[k]))
-
-                    # 1. Braccia: Spalla-Gomito (5-7, 6-8) e Gomito-Polso (7-9, 8-10)
-                    arm_pairs = [(5, 7), (7, 9), (6, 8), (8, 10)]
-                    for (u, v) in arm_pairs:
-                        if is_valid_kpt(u) and is_valid_kpt(v):
-                            if len(caps) >= MAX_CAPS: break
-                            pa, pb = xyz_base[u], xyz_base[v]
-                            caps.append((pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], float(arms_radius), float(min(conf[u], conf[v]))))
-
-                    # 2. Busto + Testa: Unica capsula dal punto medio dei fianchi (11,12) al naso (0)
-                    if is_valid_kpt(11) and is_valid_kpt(12) and is_valid_kpt(0):
-                        if len(caps) < MAX_CAPS:
-                            p_hips = (xyz_base[11] + xyz_base[12]) * 0.5
-                            p_nose = xyz_base[0]
-                            c_torso = min(conf[11], conf[12], conf[0])
-                            caps.append((p_hips[0], p_hips[1], p_hips[2], p_nose[0], p_nose[1], p_nose[2], float(torso_radius), float(c_torso)))
-
-                    # # 5. Serializzazione e invio dati (impacchettamento e invio nel loop)
-                    # t_mono_ns = time.monotonic_ns()
-                    # # Header: Magic, Versione, Numero Capsule, Timestamp
-                    # # struct.pack(): converte i dati in una stringa di byte secondo il formato specificato
-                    # header = struct.pack(HDR_FMT, MAGIC, VERSION, len(caps), t_mono_ns)
-                    # # Payload: Lista di capsule (*rec serve a spacchettare la tupla della capsula in singoli argomenti - grazie all'asterisco -)
-                    # payload = b"".join(struct.pack(REC_FMT, *rec) for rec in caps)
-                    # # Invio messaggio completo (header + payload) (singolo messaggio atomico)
-                    # pub.send(header + payload)
+                    time.sleep(3) # Pausa per permettere a Plotly di renderizzare la figura (debug)
                 
                 if not frame is None:
                     cv2.imshow(f"YOLO Skeleton Realtime Camera {n}", frame)
@@ -160,6 +133,42 @@ def main():
                 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
+
+            # Misura del tempo ciclo
+            tNow = time.time()
+            print(f"\rTempo ciclo main: {tNow - t0:.3f} s", end="")
+
+            # # --- MODIFICA: Capsule semplificate (Braccia + Busto/Testa unico) ---
+            # caps = []
+            # # Helper per validità
+            # def is_valid_kpt(k):
+            #     return (conf[k] >= tracker.conf_thr) and np.all(np.isfinite(xyz_base[k]))
+# 
+            # # 1. Braccia: Spalla-Gomito (5-7, 6-8) e Gomito-Polso (7-9, 8-10)
+            # arm_pairs = [(5, 7), (7, 9), (6, 8), (8, 10)]
+            # for (u, v) in arm_pairs:
+            #     if is_valid_kpt(u) and is_valid_kpt(v):
+            #         if len(caps) >= MAX_CAPS: break
+            #         pa, pb = xyz_base[u], xyz_base[v]
+            #         caps.append((pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], float(arms_radius), float(min(conf[u], conf[v]))))
+# 
+            # # 2. Busto + Testa: Unica capsula dal punto medio dei fianchi (11,12) al naso (0)
+            # if is_valid_kpt(11) and is_valid_kpt(12) and is_valid_kpt(0):
+            #     if len(caps) < MAX_CAPS:
+            #         p_hips = (xyz_base[11] + xyz_base[12]) * 0.5
+            #         p_nose = xyz_base[0]
+            #         c_torso = min(conf[11], conf[12], conf[0])
+            #         caps.append((p_hips[0], p_hips[1], p_hips[2], p_nose[0], p_nose[1], p_nose[2], float(torso_radius), float(c_torso)))
+
+            # # 5. Serializzazione e invio dati (impacchettamento e invio nel loop)
+            # t_mono_ns = time.monotonic_ns()
+            # # Header: Magic, Versione, Numero Capsule, Timestamp
+            # # struct.pack(): converte i dati in una stringa di byte secondo il formato specificato
+            # header = struct.pack(HDR_FMT, MAGIC, VERSION, len(caps), t_mono_ns)
+            # # Payload: Lista di capsule (*rec serve a spacchettare la tupla della capsula in singoli argomenti - grazie all'asterisco -)
+            # payload = b"".join(struct.pack(REC_FMT, *rec) for rec in caps)
+            # # Invio messaggio completo (header + payload) (singolo messaggio atomico)
+            # pub.send(header + payload)
 
     finally:
         # Wait for both to finish
