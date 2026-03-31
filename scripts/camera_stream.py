@@ -145,7 +145,6 @@ def main():
                 message = f"{topic} {payload}"
                 socket.send_string(message)
 
-
             # # --- MODIFICA: Capsule semplificate (Braccia + Busto/Testa unico) ---
             # caps = []
             # # Helper per validità

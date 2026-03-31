@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from dash import Dash, dcc, html, Input, Output
 import plotly.express as px
 import numpy as np
@@ -7,7 +9,7 @@ import zmq
 import json
 import signal
 import threading
-from flask import request
+import time
 
 
 
@@ -18,9 +20,9 @@ endpoint = "tcp://localhost:6000"
 topic = "SKEL"
 running = True
 scene = dict(
-        xaxis = dict(nticks=10, range=[-1,1],),
-        yaxis = dict(nticks=10, range=[-1,1],),
-        zaxis = dict(nticks=10, range=[-1,1],)
+        xaxis = dict(nticks=10, range=[-1, 1],),
+        yaxis = dict(nticks=10, range=[-1, 1],),
+        zaxis = dict(nticks=10, range=[0, 2],)
         )
 camera = dict(
         up=dict(x=0, y=0, z=1),
@@ -31,20 +33,10 @@ camera = dict(
 app = Dash(__name__)
 
 data = None
+socket = None
 
 
 
-
-def shutdown_server():
-    func = request.environ.get('werkzeug.server.shutdown')
-    if func is None:
-        raise RuntimeError('Not running with Werkzeug Server')
-    func()
-
-@app.server.route('/shutdown', methods=['POST'])
-def shutdown():
-    shutdown_server()
-    return 'Server shutting down...'
 
 
 
@@ -73,6 +65,7 @@ class SkeletonVisualizer:
                 self.data = array
                 data = array
 
+
     def read_frame(self):
         with self.mutex:
             frame = self.data.copy() if self.data is not None else None
@@ -86,28 +79,40 @@ class SkeletonVisualizer:
 
 
 
+
+
 @app.callback(Output("graph", "figure"), Input('interval-component', 'n_intervals'))
-def update_plot(n_intervals):   
-    global running, data
-    # with self.mutex:
-    print([pnt[0]] for pnt in data if data is not None)
+def update_bar_chart(n_intervals):
+    global data
+
+    t1 = time.time()
 
 
-    x = [random.random(), random.random(), random.random()]
-    y = [random.random(), random.random(), random.random()]
-    z = [random.random(), random.random(), random.random()]
+    x = []
+    y = []
+    z = []
+    for [*pnt] in data:
+        x.append(pnt[0])
+        y.append(pnt[1])
+        z.append(pnt[2])
     fig = go.Figure(data=[go.Scatter3d(x=x, y=y, z=z, mode='markers')])
+
+    t2 = time.time()
+    print(f"Time elapsed for receiving data: {t2 - t1}")
 
     fig.update_layout(scene_aspectmode='cube', height=1200, width=1500, margin=dict(r=20, l=20, b=10, t=10))
     fig.update_layout(scene=scene, scene_camera=camera)
+
+    t3 = time.time()
+    print(f"Time elapsed for updating figure: {t3 - t2}")
 
     return fig
 
 
 
-
 # Main loop to receive data via ZeroMQ and update the plot
 def main():
+    global socket
     zctx = zmq.Context.instance()
     socket = zctx.socket(zmq.SUB)
     socket.connect(endpoint)
@@ -120,7 +125,7 @@ def main():
     dcc.Graph(id="graph"),
     dcc.Interval(
             id='interval-component',
-            interval=100, # in milliseconds
+            interval=20, # in milliseconds
             n_intervals=0)
     ], 
     id = "change-height", 
@@ -136,8 +141,11 @@ def main():
     # Launch data receiver thread and load the Dash interface
     vis = SkeletonVisualizer(socket).start()
     #vis.load_interface()
+
+
+
     print("Sta partendo")
-    app.run(debug=True, port=8001)
+    app.run(debug=True, port=8008)
     print("Partito")
 
 

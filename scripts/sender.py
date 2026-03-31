@@ -5,8 +5,9 @@ import time
 import numpy as np
 import struct
 import json
+import math
 
-endpoint = "tcp://*:5556"
+endpoint = "tcp://*:6000"
 topic = "SKEL"
 
 MAGIC = b"SKEL" 
@@ -46,10 +47,20 @@ header = struct.pack(HDR_FMT, MAGIC, VERSION, len(prova), t_mono_ns)
 #payload = b"".join((*pnt) for pnt in prova)
 # Invio messaggio completo (header + payload) (singolo messaggio atomico)
 
-payload = json.dumps(prova.tolist())
 
+n = 0
 while True:
+    n += 0.1
+
+    prova2 = prova.copy()
+    for i in range(len(prova)):
+        print(prova[i][0])
+        prova2[i][0] = prova[i][0] + math.sin(n)*0.1
+
+    payload = json.dumps(prova2.tolist())
+
+
     message = f"{topic} {payload}"
     socket.send_string(message)
     print(f"Published: {message}")
-    time.sleep(1)
+    time.sleep(0.1)

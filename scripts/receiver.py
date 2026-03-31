@@ -3,7 +3,7 @@
 import zmq
 import json
 
-endpoint = "tcp://localhost:5556"
+endpoint = "tcp://localhost:6000"
 topic = "SKEL"
 
 zctx = zmq.Context.instance()
